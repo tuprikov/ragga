@@ -169,3 +169,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Github settings
+.github
+
+# VS Code settings
+.vscode
+
+# Data folder
+data/
