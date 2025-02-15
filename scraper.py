@@ -1,6 +1,8 @@
 """
 Web scraping module.
 """
+import orjson
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -8,7 +10,8 @@ from selenium.webdriver.chrome.service import Service
 from urllib.parse import urljoin, urlparse
 from webdriver_manager.chrome import ChromeDriverManager
 
-from settings import BASE_URL, SKIP_EXTENSIONS, get_driver_options
+from helpers import load_jsonl
+from settings import BASE_URL, LINKS_TO_SCRAPE_FILE, SCRAPED_DATA_FILE, SKIP_EXTENSIONS, get_driver_options
 
 
 class Scraper:
@@ -106,3 +109,29 @@ class Scraper:
         
         # Skip URLs that end with unwanted file extensions
         return not any(path.endswith(ext) for ext in SKIP_EXTENSIONS)
+
+
+def main():
+    """
+    Runs the web scraper.
+    """
+    # Load visited links from JSON file.
+    scraped_data = load_jsonl(SCRAPED_DATA_FILE, {})        
+    visited_links = set(scraped_data.keys())
+
+    # Load links to scrape from JSON file.
+    links_to_scrape = load_jsonl(LINKS_TO_SCRAPE_FILE, [BASE_URL])
+
+    # Initialize the Selenium WebDriver.
+    scraper = Scraper(links_to_scrape, visited_links)
+
+    # Save data to JSON files after each page scrape.
+    with (
+        open(SCRAPED_DATA_FILE, "ab") as scraped_data_file,
+        open(LINKS_TO_SCRAPE_FILE, "wb") as links_to_scrape_file
+    ):
+        links_to_scrape_file.write(orjson.dumps(links_to_scrape) + b"\n")
+        for new_data, new_links in scraper.scrape_next_page():
+            scraped_data_file.write(orjson.dumps(new_data) + b"\n")
+            if new_links:
+                links_to_scrape_file.write(orjson.dumps(new_links) + b"\n")

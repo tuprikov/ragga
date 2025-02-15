@@ -1,41 +1,51 @@
 """
 Main module.
 """
-import orjson
+from sentence_transformers import SentenceTransformer
 
 from helpers import load_jsonl
-from settings import BASE_URL
-from scraper import Scraper
+from kb import connect_elasticsearch, insert_data, search
+from settings import SCRAPED_DATA_FILE, mapping
+from transformer import get_embeddings
 
 
-LINKS_TO_SCRAPE_FILE = "data/links_to_scrape.jsonl"
-SCRAPED_DATA_FILE = "data/scraped_data.jsonl"
+INDEX_NAME = "leudelange"
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+
+def process_and_insert_data():
+    """
+    Load data, process embeddings, and insert into Elasticsearch.
+    """
+    # Load data from a JSONL file and return its embeddings.
+    data = load_jsonl(SCRAPED_DATA_FILE, {})
+    # Remove empty values from the data.
+    data = {key: value for key, value in data.items() if value}
+    embeddings = get_embeddings(model, data)
+
+    es = connect_elasticsearch()
+    schema = mapping.copy()
+    schema["mappings"]["properties"]["embedding"]["dims"] = len(embeddings[0])
+
+    # Create the index
+    if not es.indices.exists(index=INDEX_NAME):
+        es.indices.create(index=INDEX_NAME, body=schema)
+    
+    # Insert data into the index
+    insert_data(es, INDEX_NAME, list(data.values()), embeddings)
 
 
 def main():
     """
-    The main entry point of the application.
+    Main function.
     """
-    # Load visited links from JSON file.
-    scraped_data = load_jsonl(SCRAPED_DATA_FILE, {})        
-    visited_links = set(scraped_data.keys())
-
-    # Load links to scrape from JSON file.
-    links_to_scrape = load_jsonl(LINKS_TO_SCRAPE_FILE, [BASE_URL])
-
-    # Initialize the Selenium WebDriver.
-    scraper = Scraper(links_to_scrape, visited_links)
-
-    # Save data to JSON files after each page scrape.
-    with (
-        open(SCRAPED_DATA_FILE, "ab") as scraped_data_file,
-        open(LINKS_TO_SCRAPE_FILE, "wb") as links_to_scrape_file
-    ):
-        links_to_scrape_file.write(orjson.dumps(links_to_scrape) + b"\n")
-        for new_data, new_links in scraper.scrape_next_page():
-            scraped_data_file.write(orjson.dumps(new_data) + b"\n")
-            if new_links:
-                links_to_scrape_file.write(orjson.dumps(new_links) + b"\n")
+    query = "Quels sont horaires d'ouverture de la mairie ?"
+    es = connect_elasticsearch()
+    
+    results = search(query, es, INDEX_NAME, model)
+    # Display results
+    for text, score in results:
+        print(f"Score: {score:.4f}\nText: {text}\n{'-'*50}")
 
 
 if __name__ == "__main__":
